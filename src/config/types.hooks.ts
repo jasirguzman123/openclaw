@@ -135,6 +135,15 @@ export type HooksConfig = {
   presets?: string[];
   transformsDir?: string;
   mappings?: HookMappingConfig[];
+  ping?: {
+    callbacks?: Record<
+      string,
+      {
+        url: string;
+        token?: string;
+      }
+    >;
+  };
   gmail?: HooksGmailConfig;
   /** Internal agent event hooks */
   internal?: InternalHooksConfig;

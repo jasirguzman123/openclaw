@@ -95,6 +95,35 @@ Effect:
 - Always posts a summary into the **main** session
 - If `wakeMode=now`, triggers an immediate heartbeat
 
+### `POST /hooks/ping`
+
+Payload:
+
+```json
+{
+  "update_id": "upd_123",
+  "tenant_id": "tenant_abc",
+  "callback_ref": "workonleaf-default",
+  "message": "Optional task message override",
+  "agentId": "main",
+  "sessionKey": "hook:workonleaf:upd_123",
+  "model": "openai/gpt-5.2-mini",
+  "thinking": "low"
+}
+```
+
+- `update_id` **required** (string): External update identifier from your product workflow.
+- `tenant_id` **required** (string): Tenant identifier used for callback correlation.
+- `callback_ref` **required** (string): Key under `hooks.ping.callbacks`.
+- `message` optional (string): Prompt override. If omitted, OpenClaw builds a default status-processing message.
+- `agentId`, `sessionKey`, `model`, `thinking` optional: same semantics as `/hooks/agent`.
+
+Effect:
+
+- Starts an **isolated** agent run immediately.
+- Returns `202` with `runId`.
+- Posts completion/failure to the configured callback URL for `callback_ref`.
+
 ## Session key policy (breaking change)
 
 `/hooks/agent` payload `sessionKey` overrides are disabled by default.
@@ -151,6 +180,7 @@ Mapping options (summary):
 - `hooks.defaultSessionKey` sets the default session for hook agent runs when no explicit key is provided.
 - `hooks.allowRequestSessionKey` controls whether `/hooks/agent` payloads may set `sessionKey` (default: `false`).
 - `hooks.allowedSessionKeyPrefixes` optionally restricts explicit `sessionKey` values from request payloads and mappings.
+- `hooks.ping.callbacks.<ref>` configures callback endpoints for `/hooks/ping`.
 - `allowUnsafeExternalContent: true` disables the external content safety wrapper for that hook
   (dangerous; only for trusted internal sources).
 - `openclaw webhooks gmail setup` writes `hooks.gmail` config for `openclaw webhooks gmail run`.
@@ -160,6 +190,7 @@ Mapping options (summary):
 
 - `200` for `/hooks/wake`
 - `202` for `/hooks/agent` (async run started)
+- `202` for `/hooks/ping` (async run started)
 - `401` on auth failure
 - `429` after repeated auth failures from the same client (check `Retry-After`)
 - `400` on invalid payload
@@ -179,6 +210,13 @@ curl -X POST http://127.0.0.1:18789/hooks/agent \
   -H 'x-openclaw-token: SECRET' \
   -H 'Content-Type: application/json' \
   -d '{"message":"Summarize inbox","name":"Email","wakeMode":"next-heartbeat"}'
+```
+
+```bash
+curl -X POST http://127.0.0.1:18789/hooks/ping \
+  -H 'Authorization: Bearer SECRET' \
+  -H 'Content-Type: application/json' \
+  -d '{"update_id":"upd_123","tenant_id":"tenant_abc","callback_ref":"workonleaf-default"}'
 ```
 
 ### Use a different model

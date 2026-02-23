@@ -17,8 +17,14 @@ export type HooksConfigResolved = {
   token: string;
   maxBodyBytes: number;
   mappings: HookMappingResolved[];
+  pingCallbacks: Record<string, HookPingCallbackResolved>;
   agentPolicy: HookAgentPolicyResolved;
   sessionPolicy: HookSessionPolicyResolved;
+};
+
+export type HookPingCallbackResolved = {
+  url: string;
+  token?: string;
 };
 
 export type HookAgentPolicyResolved = {
@@ -52,6 +58,7 @@ export function resolveHooksConfig(cfg: OpenClawConfig): HooksConfigResolved | n
       ? cfg.hooks.maxBodyBytes
       : DEFAULT_HOOKS_MAX_BODY_BYTES;
   const mappings = resolveHookMappings(cfg.hooks);
+  const pingCallbacks = resolvePingCallbacks(cfg);
   const defaultAgentId = resolveDefaultAgentId(cfg);
   const knownAgentIds = resolveKnownAgentIds(cfg, defaultAgentId);
   const allowedAgentIds = resolveAllowedAgentIds(cfg.hooks?.allowedAgentIds);
@@ -80,6 +87,7 @@ export function resolveHooksConfig(cfg: OpenClawConfig): HooksConfigResolved | n
     token,
     maxBodyBytes,
     mappings,
+    pingCallbacks,
     agentPolicy: {
       defaultAgentId,
       knownAgentIds,
@@ -91,6 +99,34 @@ export function resolveHooksConfig(cfg: OpenClawConfig): HooksConfigResolved | n
       allowedSessionKeyPrefixes,
     },
   };
+}
+
+function resolvePingCallbacks(cfg: OpenClawConfig): Record<string, HookPingCallbackResolved> {
+  const raw = cfg.hooks?.ping?.callbacks;
+  if (!raw || typeof raw !== "object") {
+    return {};
+  }
+
+  const entries = Object.entries(raw);
+  const resolved: Record<string, HookPingCallbackResolved> = {};
+  for (const [ref, value] of entries) {
+    const callbackRef = ref.trim();
+    if (!callbackRef || !value || typeof value !== "object") {
+      continue;
+    }
+    const url =
+      typeof value.url === "string" && value.url.trim().length > 0 ? value.url.trim() : undefined;
+    if (!url) {
+      continue;
+    }
+    const token =
+      typeof value.token === "string" && value.token.trim().length > 0
+        ? value.token.trim()
+        : undefined;
+    resolved[callbackRef] = { url, token };
+  }
+
+  return resolved;
 }
 
 function resolveKnownAgentIds(cfg: OpenClawConfig, defaultAgentId: string): Set<string> {
@@ -236,6 +272,22 @@ export type HookAgentPayload = {
 export type HookAgentDispatchPayload = Omit<HookAgentPayload, "sessionKey"> & {
   sessionKey: string;
   allowUnsafeExternalContent?: boolean;
+};
+
+export type HookPingPayload = {
+  update_id: string;
+  tenant_id: string;
+  callback_ref: string;
+  message?: string;
+  agentId?: string;
+  sessionKey?: string;
+  model?: string;
+  thinking?: string;
+};
+
+export type HookPingDispatchPayload = HookPingPayload & {
+  sessionKey: string;
+  callback: HookPingCallbackResolved;
 };
 
 const listHookChannelValues = () => ["last", ...listChannelPlugins().map((plugin) => plugin.id)];
@@ -385,6 +437,56 @@ export function normalizeAgentPayload(payload: Record<string, unknown>):
       model,
       thinking,
       timeoutSeconds,
+    },
+  };
+}
+
+export function normalizePingPayload(payload: Record<string, unknown>):
+  | {
+      ok: true;
+      value: HookPingPayload;
+    }
+  | { ok: false; error: string } {
+  const updateId = typeof payload.update_id === "string" ? payload.update_id.trim() : "";
+  if (!updateId) {
+    return { ok: false, error: "update_id required" };
+  }
+  const tenantId = typeof payload.tenant_id === "string" ? payload.tenant_id.trim() : "";
+  if (!tenantId) {
+    return { ok: false, error: "tenant_id required" };
+  }
+  const callbackRef = typeof payload.callback_ref === "string" ? payload.callback_ref.trim() : "";
+  if (!callbackRef) {
+    return { ok: false, error: "callback_ref required" };
+  }
+
+  const message = typeof payload.message === "string" ? payload.message.trim() : "";
+  const agentIdRaw = payload.agentId;
+  const agentId =
+    typeof agentIdRaw === "string" && agentIdRaw.trim() ? agentIdRaw.trim() : undefined;
+  const sessionKeyRaw = payload.sessionKey;
+  const sessionKey =
+    typeof sessionKeyRaw === "string" && sessionKeyRaw.trim() ? sessionKeyRaw.trim() : undefined;
+  const modelRaw = payload.model;
+  const model = typeof modelRaw === "string" && modelRaw.trim() ? modelRaw.trim() : undefined;
+  if (modelRaw !== undefined && !model) {
+    return { ok: false, error: "model required" };
+  }
+  const thinkingRaw = payload.thinking;
+  const thinking =
+    typeof thinkingRaw === "string" && thinkingRaw.trim() ? thinkingRaw.trim() : undefined;
+
+  return {
+    ok: true,
+    value: {
+      update_id: updateId,
+      tenant_id: tenantId,
+      callback_ref: callbackRef,
+      message: message || undefined,
+      agentId,
+      sessionKey,
+      model,
+      thinking,
     },
   };
 }

@@ -7,7 +7,11 @@ import type { CronJob } from "../../cron/types.js";
 import { requestHeartbeatNow } from "../../infra/heartbeat-wake.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import type { createSubsystemLogger } from "../../logging/subsystem.js";
-import type { HookAgentDispatchPayload, HooksConfigResolved } from "../hooks.js";
+import type {
+  HookAgentDispatchPayload,
+  HookPingDispatchPayload,
+  HooksConfigResolved,
+} from "../hooks.js";
 import { createHooksRequestHandler } from "../server-http.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
@@ -95,12 +99,135 @@ export function createGatewayHooksRequestHandler(params: {
     return runId;
   };
 
+  const dispatchPingHook = (value: HookPingDispatchPayload) => {
+    const sessionKey = value.sessionKey.trim();
+    const mainSessionKey = resolveMainSessionKeyFromConfig();
+    const jobId = randomUUID();
+    const now = Date.now();
+    const message =
+      value.message?.trim() ||
+      `Process update ${value.update_id} for tenant ${value.tenant_id} and provide a concise status update.`;
+    const job: CronJob = {
+      id: jobId,
+      agentId: value.agentId,
+      name: "PingHook",
+      enabled: true,
+      createdAtMs: now,
+      updatedAtMs: now,
+      schedule: { kind: "at", at: new Date(now).toISOString() },
+      sessionTarget: "isolated",
+      wakeMode: "now",
+      payload: {
+        kind: "agentTurn",
+        message,
+        model: value.model,
+        thinking: value.thinking,
+        deliver: false,
+        channel: "last",
+      },
+      state: { nextRunAtMs: now },
+    };
+
+    const runId = randomUUID();
+    void (async () => {
+      const finishedAt = new Date().toISOString();
+      try {
+        const cfg = loadConfig();
+        const result = await runCronIsolatedAgentTurn({
+          cfg,
+          deps,
+          job,
+          message,
+          sessionKey,
+          lane: "cron",
+        });
+
+        const summary = result.summary?.trim() || result.error?.trim() || result.status;
+        await postPingCallback(value, {
+          runId,
+          status: result.status === "ok" ? "ok" : "error",
+          summary,
+          error: result.status === "ok" ? undefined : result.error || summary,
+          sessionKey,
+          finishedAt,
+        });
+
+        if (!result.delivered) {
+          enqueueSystemEvent(`Ping ${value.update_id}: ${summary}`.trim(), {
+            sessionKey: mainSessionKey,
+          });
+        }
+      } catch (err) {
+        const error = String(err);
+        logHooks.warn(`hook ping failed: ${error}`);
+        enqueueSystemEvent(`Ping ${value.update_id} (error): ${error}`, {
+          sessionKey: mainSessionKey,
+        });
+        await postPingCallback(value, {
+          runId,
+          status: "error",
+          summary: error,
+          error,
+          sessionKey,
+          finishedAt,
+        });
+      }
+    })();
+
+    return runId;
+  };
+
+  async function postPingCallback(
+    value: HookPingDispatchPayload,
+    result: {
+      runId: string;
+      status: "ok" | "error";
+      summary: string;
+      error?: string;
+      sessionKey: string;
+      finishedAt: string;
+    },
+  ) {
+    try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (value.callback.token) {
+        headers.Authorization = `Bearer ${value.callback.token}`;
+      }
+
+      const response = await fetch(value.callback.url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          run_id: result.runId,
+          update_id: value.update_id,
+          tenant_id: value.tenant_id,
+          callback_ref: value.callback_ref,
+          status: result.status,
+          summary: result.summary,
+          error: result.error,
+          session_key: result.sessionKey,
+          finished_at: result.finishedAt,
+        }),
+      });
+      if (!response.ok) {
+        logHooks.warn(
+          `hook ping callback failed for ${value.callback_ref}: status=${response.status}`,
+        );
+      }
+    } catch (err) {
+      logHooks.warn(`hook ping callback error for ${value.callback_ref}: ${String(err)}`);
+    }
+  }
+
   return createHooksRequestHandler({
     getHooksConfig,
     bindHost,
     port,
     logHooks,
     dispatchAgentHook,
+    dispatchPingHook,
     dispatchWakeHook,
   });
 }

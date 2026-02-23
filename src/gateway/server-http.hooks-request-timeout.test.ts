@@ -25,6 +25,7 @@ function createHooksConfig(): HooksConfigResolved {
     token: "hook-secret",
     maxBodyBytes: 1024,
     mappings: [],
+    pingCallbacks: {},
     agentPolicy: {
       defaultAgentId: "main",
       knownAgentIds: new Set(["main"]),
@@ -71,6 +72,7 @@ function createResponse(): {
 function createHandler(params?: {
   dispatchWakeHook?: HooksHandlerDeps["dispatchWakeHook"];
   dispatchAgentHook?: HooksHandlerDeps["dispatchAgentHook"];
+  dispatchPingHook?: HooksHandlerDeps["dispatchPingHook"];
 }) {
   return createHooksRequestHandler({
     getHooksConfig: () => createHooksConfig(),
@@ -89,6 +91,8 @@ function createHandler(params?: {
       }) as HooksHandlerDeps["dispatchWakeHook"]),
     dispatchAgentHook:
       params?.dispatchAgentHook ?? ((() => "run-1") as HooksHandlerDeps["dispatchAgentHook"]),
+    dispatchPingHook:
+      params?.dispatchPingHook ?? ((() => "run-1") as HooksHandlerDeps["dispatchPingHook"]),
   });
 }
 

@@ -3,7 +3,12 @@ import { ToolsSchema } from "./zod-schema.agent-runtime.js";
 import { AgentsSchema, AudioSchema, BindingsSchema, BroadcastSchema } from "./zod-schema.agents.js";
 import { ApprovalsSchema } from "./zod-schema.approvals.js";
 import { HexColorSchema, ModelsConfigSchema } from "./zod-schema.core.js";
-import { HookMappingSchema, HooksGmailSchema, InternalHooksSchema } from "./zod-schema.hooks.js";
+import {
+  HookMappingSchema,
+  HooksGmailSchema,
+  HooksPingSchema,
+  InternalHooksSchema,
+} from "./zod-schema.hooks.js";
 import { InstallRecordShape } from "./zod-schema.installs.js";
 import { ChannelsSchema } from "./zod-schema.providers.js";
 import { sensitive } from "./zod-schema.sensitive.js";
@@ -340,6 +345,7 @@ export const OpenClawSchema = z
         presets: z.array(z.string()).optional(),
         transformsDir: z.string().optional(),
         mappings: z.array(HookMappingSchema).optional(),
+        ping: HooksPingSchema,
         gmail: HooksGmailSchema,
         internal: InternalHooksSchema,
       })

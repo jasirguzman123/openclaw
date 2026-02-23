@@ -2155,6 +2155,14 @@ See [Multiple Gateways](/gateway/multiple-gateways).
     allowedAgentIds: ["hooks", "main"],
     presets: ["gmail"],
     transformsDir: "~/.openclaw/hooks/transforms",
+    ping: {
+      callbacks: {
+        "workonleaf-default": {
+          url: "https://control-plane.example.com/api/v1/openclaw/callbacks",
+          token: "callback-secret",
+        },
+      },
+    },
     mappings: [
       {
         match: { path: "gmail" },
@@ -2180,6 +2188,8 @@ Auth: `Authorization: Bearer <token>` or `x-openclaw-token: <token>`.
 - `POST /hooks/wake` → `{ text, mode?: "now"|"next-heartbeat" }`
 - `POST /hooks/agent` → `{ message, name?, agentId?, sessionKey?, wakeMode?, deliver?, channel?, to?, model?, thinking?, timeoutSeconds? }`
   - `sessionKey` from request payload is accepted only when `hooks.allowRequestSessionKey=true` (default: `false`).
+- `POST /hooks/ping` → `{ update_id, tenant_id, callback_ref, message?, agentId?, sessionKey?, model?, thinking? }`
+  - `callback_ref` must exist under `hooks.ping.callbacks`.
 - `POST /hooks/<name>` → resolved via `hooks.mappings`
 
 <Accordion title="Mapping details">
@@ -2194,6 +2204,8 @@ Auth: `Authorization: Bearer <token>` or `x-openclaw-token: <token>`.
 - `defaultSessionKey`: optional fixed session key for hook agent runs without explicit `sessionKey`.
 - `allowRequestSessionKey`: allow `/hooks/agent` callers to set `sessionKey` (default: `false`).
 - `allowedSessionKeyPrefixes`: optional prefix allowlist for explicit `sessionKey` values (request + mapping), e.g. `["hook:"]`.
+- `ping.callbacks.<ref>.url`: callback endpoint for `/hooks/ping` completion updates.
+- `ping.callbacks.<ref>.token`: optional bearer token attached to callback requests.
 - `deliver: true` sends final reply to a channel; `channel` defaults to `last`.
 - `model` overrides LLM for this hook run (must be allowed if model catalog is set).
 

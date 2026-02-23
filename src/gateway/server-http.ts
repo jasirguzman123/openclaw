@@ -47,8 +47,10 @@ import {
   isHookAgentAllowed,
   normalizeAgentPayload,
   normalizeHookHeaders,
+  normalizePingPayload,
   normalizeWakePayload,
   readJsonBody,
+  type HookPingDispatchPayload,
   resolveHookSessionKey,
   resolveHookTargetAgentId,
   resolveHookChannel,
@@ -70,6 +72,7 @@ const HOOK_AUTH_FAILURE_WINDOW_MS = 60_000;
 type HookDispatchers = {
   dispatchWakeHook: (value: { text: string; mode: "now" | "next-heartbeat" }) => void;
   dispatchAgentHook: (value: HookAgentDispatchPayload) => string;
+  dispatchPingHook: (value: HookPingDispatchPayload) => string;
 };
 
 function sendJson(res: ServerResponse, status: number, body: unknown) {
@@ -208,7 +211,15 @@ export function createHooksRequestHandler(
     logHooks: SubsystemLogger;
   } & HookDispatchers,
 ): HooksRequestHandler {
-  const { getHooksConfig, bindHost, port, logHooks, dispatchAgentHook, dispatchWakeHook } = opts;
+  const {
+    getHooksConfig,
+    bindHost,
+    port,
+    logHooks,
+    dispatchAgentHook,
+    dispatchWakeHook,
+    dispatchPingHook,
+  } = opts;
   const hookAuthLimiter = createAuthRateLimiter({
     maxAttempts: HOOK_AUTH_FAILURE_LIMIT,
     windowMs: HOOK_AUTH_FAILURE_WINDOW_MS,
@@ -328,6 +339,43 @@ export function createHooksRequestHandler(
         ...normalized.value,
         sessionKey: sessionKey.value,
         agentId: resolveHookTargetAgentId(hooksConfig, normalized.value.agentId),
+      });
+      sendJson(res, 202, { ok: true, runId });
+      return true;
+    }
+
+    if (subPath === "ping") {
+      const normalized = normalizePingPayload(payload as Record<string, unknown>);
+      if (!normalized.ok) {
+        sendJson(res, 400, { ok: false, error: normalized.error });
+        return true;
+      }
+      if (!isHookAgentAllowed(hooksConfig, normalized.value.agentId)) {
+        sendJson(res, 400, { ok: false, error: getHookAgentPolicyError() });
+        return true;
+      }
+
+      const callback = hooksConfig.pingCallbacks[normalized.value.callback_ref];
+      if (!callback) {
+        sendJson(res, 400, { ok: false, error: "callback_ref is not configured" });
+        return true;
+      }
+
+      const sessionKey = resolveHookSessionKey({
+        hooksConfig,
+        source: "request",
+        sessionKey: normalized.value.sessionKey,
+      });
+      if (!sessionKey.ok) {
+        sendJson(res, 400, { ok: false, error: sessionKey.error });
+        return true;
+      }
+
+      const runId = dispatchPingHook({
+        ...normalized.value,
+        sessionKey: sessionKey.value,
+        agentId: resolveHookTargetAgentId(hooksConfig, normalized.value.agentId),
+        callback,
       });
       sendJson(res, 202, { ok: true, runId });
       return true;

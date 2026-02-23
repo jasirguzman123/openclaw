@@ -159,3 +159,20 @@ export const HooksGmailSchema = z
   })
   .strict()
   .optional();
+
+export const HooksPingSchema = z
+  .object({
+    callbacks: z
+      .record(
+        z.string(),
+        z
+          .object({
+            url: z.string(),
+            token: z.string().optional().register(sensitive),
+          })
+          .strict(),
+      )
+      .optional(),
+  })
+  .strict()
+  .optional();
