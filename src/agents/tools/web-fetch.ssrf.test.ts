@@ -39,6 +39,7 @@ function setMockFetch(
 
 async function createWebFetchToolForTest(params?: {
   firecrawl?: { enabled?: boolean; apiKey?: string };
+  hostnameAllowlist?: string[];
 }) {
   const { createWebFetchTool } = await import("./web-tools.js");
   return createWebFetchTool({
@@ -48,6 +49,7 @@ async function createWebFetchToolForTest(params?: {
           fetch: {
             cacheTtlMinutes: 0,
             firecrawl: params?.firecrawl ?? { enabled: false },
+            ...(params?.hostnameAllowlist ? { hostnameAllowlist: params.hostnameAllowlist } : {}),
           },
         },
       },
@@ -141,5 +143,20 @@ describe("web_fetch SSRF protection", () => {
       status: 200,
       extractor: "raw",
     });
+  });
+
+  it("enforces hostname allowlist when configured", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const tool = await createWebFetchToolForTest({
+      hostnameAllowlist: ["*.example.com"],
+    });
+
+    setMockFetch().mockResolvedValue(textResponse("ok"));
+    await expectBlockedUrl(tool, "https://openclaw.ai/public", /allowlist/i);
+
+    const result = await tool?.execute?.("call", {
+      url: "https://www.example.com/v1/status",
+    });
+    expect(result?.details).toMatchObject({ status: 200 });
   });
 });

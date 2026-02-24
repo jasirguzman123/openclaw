@@ -251,7 +251,9 @@ export async function resolvePinnedHostnameWithPolicy(
   const allowedHostnames = normalizeHostnameSet(params.policy?.allowedHostnames);
   const hostnameAllowlist = normalizeHostnameAllowlist(params.policy?.hostnameAllowlist);
   const isExplicitAllowed = allowedHostnames.has(normalized);
-  const skipPrivateNetworkChecks = allowPrivateNetwork || isExplicitAllowed;
+  const matchesAllowlist =
+    hostnameAllowlist.length > 0 && matchesHostnameAllowlist(normalized, hostnameAllowlist);
+  const skipPrivateNetworkChecks = allowPrivateNetwork || isExplicitAllowed || matchesAllowlist;
 
   if (!matchesHostnameAllowlist(normalized, hostnameAllowlist)) {
     throw new SsrFBlockedError(`Blocked hostname (not in allowlist): ${hostname}`);

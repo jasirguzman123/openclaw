@@ -20,6 +20,78 @@ const adjustedParamsByToolCallId = new Map<string, unknown>();
 const MAX_TRACKED_ADJUSTED_PARAMS = 1024;
 const LOOP_WARNING_BUCKET_SIZE = 10;
 const MAX_LOOP_WARNING_KEYS = 256;
+const TENANT_ALLOWED_DOMAINS_ENV = "OPENCLAW_TENANT_ALLOWED_DOMAINS";
+const URL_REGEX = /https?:\/\/[^\s"'`<>]+/gi;
+
+function parseTenantAllowedDomains(): string[] {
+  const raw = process.env[TENANT_ALLOWED_DOMAINS_ENV];
+  if (!raw) {
+    return [];
+  }
+  return raw
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function hostMatchesTenantDomain(host: string, allowedDomains: string[]): boolean {
+  const normalized = host.trim().toLowerCase();
+  return allowedDomains.some(
+    (domain) => normalized === domain || normalized.endsWith(`.${domain}`),
+  );
+}
+
+function extractUrlsFromText(value: string): string[] {
+  const matches = value.match(URL_REGEX);
+  return matches ? matches : [];
+}
+
+function resolveDomainGuardViolation(toolName: string, params: unknown): string | null {
+  const allowedDomains = parseTenantAllowedDomains();
+  if (allowedDomains.length === 0 || !isPlainObject(params)) {
+    return null;
+  }
+
+  const normalizedToolName = normalizeToolName(toolName);
+  const blockedHosts = new Set<string>();
+  const recordBlockedHost = (urlText: string) => {
+    try {
+      const host = new URL(urlText).hostname.trim().toLowerCase();
+      if (!hostMatchesTenantDomain(host, allowedDomains)) {
+        blockedHosts.add(host);
+      }
+    } catch {
+      // Ignore malformed URL text for guard checks.
+    }
+  };
+
+  if (normalizedToolName === "web_fetch") {
+    const rawUrl = typeof params.url === "string" ? params.url.trim() : "";
+    if (rawUrl) {
+      recordBlockedHost(rawUrl);
+    }
+  } else if (normalizedToolName === "exec") {
+    const rawCommand =
+      typeof params.command === "string"
+        ? params.command
+        : typeof params.cmd === "string"
+          ? params.cmd
+          : typeof params.script === "string"
+            ? params.script
+            : "";
+    for (const match of extractUrlsFromText(rawCommand)) {
+      recordBlockedHost(match);
+    }
+  }
+
+  if (blockedHosts.size === 0) {
+    return null;
+  }
+  return (
+    `Blocked by tenant domain policy: requested host(s) ${Array.from(blockedHosts).join(", ")} ` +
+    `are outside allowlist (${allowedDomains.join(", ")}).`
+  );
+}
 
 function shouldEmitLoopWarning(state: SessionState, warningKey: string, count: number): boolean {
   if (!state.toolLoopWarningBuckets) {
@@ -79,6 +151,10 @@ export async function runBeforeToolCallHook(args: {
 }): Promise<HookOutcome> {
   const toolName = normalizeToolName(args.toolName || "tool");
   const params = args.params;
+  const domainGuardViolation = resolveDomainGuardViolation(toolName, params);
+  if (domainGuardViolation) {
+    return { blocked: true, reason: domainGuardViolation };
+  }
 
   if (args.ctx?.sessionKey) {
     const { getDiagnosticSessionState } = await import("../logging/diagnostic-session-state.js");

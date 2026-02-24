@@ -319,3 +319,52 @@ describe("before_tool_call loop detection behavior", () => {
     });
   });
 });
+
+describe("before_tool_call tenant domain guard", () => {
+  beforeEach(() => {
+    delete process.env.OPENCLAW_TENANT_ALLOWED_DOMAINS;
+    mockGetGlobalHookRunner.mockReturnValue({
+      hasHooks: vi.fn().mockReturnValue(false),
+      runBeforeToolCall: vi.fn(),
+      // oxlint-disable-next-line typescript/no-explicit-any
+    } as any);
+  });
+
+  it("blocks exec commands with out-of-allowlist URLs", async () => {
+    process.env.OPENCLAW_TENANT_ALLOWED_DOMAINS = "tenant.example.com,api.tenant.example.com";
+    const execute = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "ok" }] });
+    // oxlint-disable-next-line typescript/no-explicit-any
+    const tool = wrapToolWithBeforeToolCallHook({ name: "exec", execute } as any, {
+      sessionKey: "main",
+    });
+
+    await expect(
+      tool.execute(
+        "exec-1",
+        { command: "curl https://evil.example.net/v1/orders -X POST" },
+        undefined,
+        undefined,
+      ),
+    ).rejects.toThrow("Blocked by tenant domain policy");
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("allows web_fetch calls for allowlisted tenant domains", async () => {
+    process.env.OPENCLAW_TENANT_ALLOWED_DOMAINS = "tenant.example.com";
+    const execute = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "ok" }] });
+    // oxlint-disable-next-line typescript/no-explicit-any
+    const tool = wrapToolWithBeforeToolCallHook({ name: "web_fetch", execute } as any, {
+      sessionKey: "main",
+    });
+
+    await expect(
+      tool.execute(
+        "fetch-1",
+        { url: "https://api.tenant.example.com/v1/status" },
+        undefined,
+        undefined,
+      ),
+    ).resolves.toBeDefined();
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+});

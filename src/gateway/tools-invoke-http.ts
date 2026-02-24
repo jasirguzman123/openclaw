@@ -1,4 +1,6 @@
+import { promises as fs } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import path from "node:path";
 import { createOpenClawTools } from "../agents/openclaw-tools.js";
 import {
   resolveEffectiveToolPolicy,
@@ -15,6 +17,7 @@ import {
   resolveToolProfilePolicy,
 } from "../agents/tool-policy.js";
 import { ToolInputError } from "../agents/tools/common.js";
+import { resolveWorkspaceRoot } from "../agents/workspace-dir.js";
 import { loadConfig } from "../config/config.js";
 import { resolveMainSessionKey } from "../config/sessions.js";
 import { logWarn } from "../logger.js";
@@ -43,6 +46,11 @@ type ToolsInvokeBody = {
   args?: unknown;
   sessionKey?: unknown;
   dryRun?: unknown;
+};
+
+type WriteArgs = {
+  path?: unknown;
+  content?: unknown;
 };
 
 function resolveSessionKeyFromBody(body: ToolsInvokeBody): string | undefined {
@@ -74,6 +82,40 @@ function resolveMemoryToolDisableReasons(cfg: ReturnType<typeof loadConfig>): st
     reasons.push("memory plugin disabled by test default");
   }
   return reasons;
+}
+
+async function handleWorkspaceWriteTool(params: {
+  cfg: ReturnType<typeof loadConfig>;
+  args: Record<string, unknown>;
+}): Promise<
+  | { ok: true; result: { path: string; bytes: number } }
+  | { ok: false; status: number; message: string }
+> {
+  const raw = params.args as WriteArgs;
+  const relPath = typeof raw.path === "string" ? raw.path.trim() : "";
+  if (!relPath) {
+    return { ok: false, status: 400, message: "write requires args.path" };
+  }
+  if (path.isAbsolute(relPath)) {
+    return { ok: false, status: 400, message: "write args.path must be workspace-relative" };
+  }
+  const content = typeof raw.content === "string" ? raw.content : undefined;
+  if (content === undefined) {
+    return { ok: false, status: 400, message: "write requires args.content (string)" };
+  }
+
+  const workspaceRoot = resolveWorkspaceRoot(params.cfg.agents?.defaults?.workspace);
+  const fullPath = path.resolve(workspaceRoot, relPath);
+  const rootWithSep = workspaceRoot.endsWith(path.sep)
+    ? workspaceRoot
+    : `${workspaceRoot}${path.sep}`;
+  if (!fullPath.startsWith(rootWithSep) && fullPath !== workspaceRoot) {
+    return { ok: false, status: 400, message: "write path escapes workspace root" };
+  }
+
+  await fs.mkdir(path.dirname(fullPath), { recursive: true });
+  await fs.writeFile(fullPath, content, "utf-8");
+  return { ok: true, result: { path: relPath, bytes: Buffer.byteLength(content, "utf8") } };
 }
 
 function mergeActionIntoArgsIfSupported(params: {
@@ -203,6 +245,29 @@ export async function handleToolsInvokeHttpRequest(
     argsRaw && typeof argsRaw === "object" && !Array.isArray(argsRaw)
       ? (argsRaw as Record<string, unknown>)
       : {};
+
+  // Convenience file-write endpoint for control-plane bootstrap:
+  // POST /tools/invoke { tool: "write", args: { path, content } }
+  if (toolName === "write") {
+    try {
+      const writeResult = await handleWorkspaceWriteTool({ cfg, args });
+      if (!writeResult.ok) {
+        sendJson(res, writeResult.status, {
+          ok: false,
+          error: { type: "invalid_request", message: writeResult.message },
+        });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, result: writeResult.result });
+      return true;
+    } catch (err) {
+      sendJson(res, 500, {
+        ok: false,
+        error: { type: "internal_error", message: getErrorMessage(err) },
+      });
+      return true;
+    }
+  }
 
   const rawSessionKey = resolveSessionKeyFromBody(body);
   const sessionKey =

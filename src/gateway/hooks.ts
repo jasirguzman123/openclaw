@@ -25,6 +25,7 @@ export type HooksConfigResolved = {
 export type HookPingCallbackResolved = {
   url: string;
   token?: string;
+  allowedDomains?: string[];
 };
 
 export type HookAgentPolicyResolved = {
@@ -38,6 +39,19 @@ export type HookSessionPolicyResolved = {
   allowRequestSessionKey: boolean;
   allowedSessionKeyPrefixes?: string[];
 };
+
+function normalizeDomainEntry(raw: string): string {
+  const value = raw.trim().toLowerCase();
+  if (!value) {
+    return "";
+  }
+  try {
+    const parsed = new URL(value.includes("://") ? value : `https://${value}`);
+    return parsed.hostname.trim().toLowerCase();
+  } catch {
+    return value;
+  }
+}
 
 export function resolveHooksConfig(cfg: OpenClawConfig): HooksConfigResolved | null {
   if (cfg.hooks?.enabled !== true) {
@@ -123,7 +137,12 @@ function resolvePingCallbacks(cfg: OpenClawConfig): Record<string, HookPingCallb
       typeof value.token === "string" && value.token.trim().length > 0
         ? value.token.trim()
         : undefined;
-    resolved[callbackRef] = { url, token };
+    const allowedDomains = Array.isArray(value.allowedDomains)
+      ? value.allowedDomains
+          .map((entry) => (typeof entry === "string" ? normalizeDomainEntry(entry) : ""))
+          .filter(Boolean)
+      : undefined;
+    resolved[callbackRef] = { url, token, allowedDomains };
   }
 
   return resolved;

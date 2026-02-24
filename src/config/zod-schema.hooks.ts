@@ -169,6 +169,7 @@ export const HooksPingSchema = z
           .object({
             url: z.string(),
             token: z.string().optional().register(sensitive),
+            allowedDomains: z.array(z.string()).optional(),
           })
           .strict(),
       )

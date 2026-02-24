@@ -112,12 +112,30 @@ export const STATE_DIR = resolveStateDir();
  * Can be overridden via OPENCLAW_CONFIG_PATH.
  * Default: ~/.openclaw/openclaw.json (or $OPENCLAW_STATE_DIR/openclaw.json)
  */
+/**
+ * Base directory for resolving relative OPENCLAW_CONFIG_PATH.
+ * Uses INIT_CWD (set by npm/pnpm when running scripts) so the config path stays
+ * correct after process.chdir() in the embedded agent (which would otherwise
+ * make a relative path resolve to the workspace and miss the real config).
+ */
+function resolveConfigPathBaseDir(env: NodeJS.ProcessEnv = process.env): string {
+  const initCwd = env.INIT_CWD?.trim();
+  if (initCwd) {
+    return path.resolve(initCwd);
+  }
+  return process.cwd();
+}
+
 export function resolveCanonicalConfigPath(
   env: NodeJS.ProcessEnv = process.env,
   stateDir: string = resolveStateDir(env, envHomedir(env)),
 ): string {
   const override = env.OPENCLAW_CONFIG_PATH?.trim() || env.CLAWDBOT_CONFIG_PATH?.trim();
   if (override) {
+    const trimmed = override.trim();
+    if (trimmed && !trimmed.startsWith("~") && !path.isAbsolute(trimmed)) {
+      return path.resolve(resolveConfigPathBaseDir(env), trimmed);
+    }
     return resolveUserPath(override, env, envHomedir(env));
   }
   return path.join(stateDir, CONFIG_FILENAME);

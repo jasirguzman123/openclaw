@@ -563,6 +563,8 @@ export const FIELD_HELP: Record<string, string> = {
   "tools.web.fetch.cacheTtlMinutes": "Cache TTL in minutes for web_fetch results.",
   "tools.web.fetch.maxRedirects": "Maximum redirects allowed for web_fetch (default: 3).",
   "tools.web.fetch.userAgent": "Override User-Agent header for web_fetch requests.",
+  "tools.web.fetch.hostnameAllowlist":
+    "Optional hostname allowlist for web_fetch targets (supports exact hosts and wildcard patterns like *.example.com).",
   "tools.web.fetch.readability":
     "Use Readability to extract main content from HTML (fallbacks to basic HTML cleanup).",
   "tools.web.fetch.firecrawl.enabled": "Enable Firecrawl fallback for web_fetch (if configured).",

@@ -273,6 +273,7 @@ export const ToolsWebFetchSchema = z
     cacheTtlMinutes: z.number().nonnegative().optional(),
     maxRedirects: z.number().int().nonnegative().optional(),
     userAgent: z.string().optional(),
+    hostnameAllowlist: z.array(z.string()).optional(),
   })
   .strict()
   .optional();

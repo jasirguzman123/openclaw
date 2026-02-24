@@ -175,6 +175,10 @@ export function resolveEnableState(
   if (config.allow.length > 0 && !config.allow.includes(id)) {
     return { enabled: false, reason: "not in allowlist" };
   }
+  // Explicit allowlist entry enables the plugin (including bundled).
+  if (config.allow.length > 0 && config.allow.includes(id)) {
+    return { enabled: true };
+  }
   if (config.slots.memory === id) {
     return { enabled: true };
   }

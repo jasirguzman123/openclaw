@@ -16,6 +16,42 @@ import { createHooksRequestHandler } from "../server-http.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
 
+function buildTenantPingDefaultMessage(value: HookPingDispatchPayload): string {
+  const domains = value.callback.allowedDomains ?? [];
+  const domainsLine =
+    domains.length > 0
+      ? `Allowed tenant domains: ${domains.join(", ")}.`
+      : "Allowed tenant domains: use only domains owned by this tenant.";
+
+  return [
+    `Process update ${value.update_id} for tenant ${value.tenant_id}.`,
+    "All requests are tenant-business scoped.",
+    "Read tenant-docs/.docs-base-url for the documentation base URL, then web_fetch that URL for the index and base URL + path for each doc.",
+    "Never resolve docs under skills/tenant-api-ops/.",
+    domainsLine,
+    "If the docs URL fetch fails or the endpoint is undocumented, stop and report a status gap.",
+    "Return concise output with action, endpoint, request summary, response status, and business result.",
+  ].join(" ");
+}
+
+function classifyPolicyDecision(result: {
+  status: "ok" | "error";
+  summary: string;
+  error?: string;
+}): { decision: "allowed" | "blocked"; reason?: string } {
+  const text = `${result.summary} ${result.error ?? ""}`.toLowerCase();
+  if (
+    text.includes("blocked") &&
+    (text.includes("domain") || text.includes("allowlist") || text.includes("tenant policy"))
+  ) {
+    return {
+      decision: "blocked",
+      reason: result.error || result.summary,
+    };
+  }
+  return { decision: "allowed" };
+}
+
 export function createGatewayHooksRequestHandler(params: {
   deps: CliDeps;
   getHooksConfig: () => HooksConfigResolved | null;
@@ -104,9 +140,7 @@ export function createGatewayHooksRequestHandler(params: {
     const mainSessionKey = resolveMainSessionKeyFromConfig();
     const jobId = randomUUID();
     const now = Date.now();
-    const message =
-      value.message?.trim() ||
-      `Process update ${value.update_id} for tenant ${value.tenant_id} and provide a concise status update.`;
+    const message = value.message?.trim() || buildTenantPingDefaultMessage(value);
     const job: CronJob = {
       id: jobId,
       agentId: value.agentId,
@@ -199,17 +233,24 @@ export function createGatewayHooksRequestHandler(params: {
       const response = await fetch(value.callback.url, {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          run_id: result.runId,
-          update_id: value.update_id,
-          tenant_id: value.tenant_id,
-          callback_ref: value.callback_ref,
-          status: result.status,
-          summary: result.summary,
-          error: result.error,
-          session_key: result.sessionKey,
-          finished_at: result.finishedAt,
-        }),
+        body: JSON.stringify(
+          (() => {
+            const policy = classifyPolicyDecision(result);
+            return {
+              run_id: result.runId,
+              update_id: value.update_id,
+              tenant_id: value.tenant_id,
+              callback_ref: value.callback_ref,
+              status: result.status,
+              summary: result.summary,
+              error: result.error,
+              session_key: result.sessionKey,
+              finished_at: result.finishedAt,
+              policy_decision: policy.decision,
+              policy_reason: policy.reason,
+            };
+          })(),
+        ),
       });
       if (!response.ok) {
         logHooks.warn(

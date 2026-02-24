@@ -124,6 +124,20 @@ function resolveFetchMaxResponseBytes(fetch?: WebFetchConfig): number {
   return Math.min(FETCH_MAX_RESPONSE_BYTES_MAX, Math.max(FETCH_MAX_RESPONSE_BYTES_MIN, value));
 }
 
+function resolveFetchHostnameAllowlist(fetch?: WebFetchConfig): string[] | undefined {
+  const raw =
+    fetch && "hostnameAllowlist" in fetch && Array.isArray(fetch.hostnameAllowlist)
+      ? fetch.hostnameAllowlist
+      : undefined;
+  if (!raw) {
+    return undefined;
+  }
+  const normalized = raw
+    .map((entry) => (typeof entry === "string" ? entry.trim().toLowerCase() : ""))
+    .filter(Boolean);
+  return normalized.length > 0 ? Array.from(new Set(normalized)) : undefined;
+}
+
 function resolveFirecrawlConfig(fetch?: WebFetchConfig): FirecrawlFetchConfig {
   if (!fetch || typeof fetch !== "object") {
     return undefined;
@@ -446,6 +460,7 @@ type WebFetchRuntimeParams = FirecrawlRuntimeParams & {
   cacheTtlMs: number;
   userAgent: string;
   readabilityEnabled: boolean;
+  hostnameAllowlist?: string[];
 };
 
 function toFirecrawlContentParams(
@@ -527,6 +542,9 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
       url: params.url,
       maxRedirects: params.maxRedirects,
       timeoutMs: params.timeoutSeconds * 1000,
+      policy: params.hostnameAllowlist
+        ? { hostnameAllowlist: params.hostnameAllowlist }
+        : undefined,
       init: {
         headers: {
           Accept: "text/markdown, text/html;q=0.9, */*;q=0.1",
@@ -732,6 +750,7 @@ export function createWebFetchTool(options?: {
     (fetch && "userAgent" in fetch && typeof fetch.userAgent === "string" && fetch.userAgent) ||
     DEFAULT_FETCH_USER_AGENT;
   const maxResponseBytes = resolveFetchMaxResponseBytes(fetch);
+  const hostnameAllowlist = resolveFetchHostnameAllowlist(fetch);
   return {
     label: "Web Fetch",
     name: "web_fetch",
@@ -758,6 +777,7 @@ export function createWebFetchTool(options?: {
         cacheTtlMs: resolveCacheTtlMs(fetch?.cacheTtlMinutes, DEFAULT_CACHE_TTL_MINUTES),
         userAgent,
         readabilityEnabled,
+        hostnameAllowlist,
         firecrawlEnabled,
         firecrawlApiKey,
         firecrawlBaseUrl,

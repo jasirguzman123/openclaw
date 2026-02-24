@@ -141,6 +141,7 @@ export type HooksConfig = {
       {
         url: string;
         token?: string;
+        allowedDomains?: string[];
       }
     >;
   };
